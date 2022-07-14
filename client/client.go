@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"git.intra.123u.com/rometa/romq/msg"
-	nlog "github.com/abc463774475/my_tool/n_log"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"git.intra.123u.com/rometa/romq/msg"
+	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
 type Client struct {

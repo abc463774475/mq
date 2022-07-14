@@ -2,11 +2,12 @@ package server
 
 import (
 	"encoding/binary"
+	"net"
+	"time"
+
 	"git.intra.123u.com/rometa/romq/msg"
 	"git.intra.123u.com/rometa/romq/utils"
 	nlog "github.com/abc463774475/my_tool/n_log"
-	"net"
-	"time"
 )
 
 type route struct {

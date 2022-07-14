@@ -21,11 +21,9 @@ const (
 	MSG_CURALLROUTES
 )
 
-type MsgPing struct {
-}
+type MsgPing struct{}
 
-type MsgPong struct {
-}
+type MsgPong struct{}
 
 type MsgHandshake struct {
 	Type int32  `json:"type"`

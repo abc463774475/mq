@@ -1,9 +1,10 @@
 package server
 
 import (
-	nlog "github.com/abc463774475/my_tool/n_log"
 	"sync"
 	"sync/atomic"
+
+	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
 type subscription struct {

@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"git.intra.123u.com/rometa/romq/msg"
-	"git.intra.123u.com/rometa/romq/utils/snowflake"
-	nlog "github.com/abc463774475/my_tool/n_log"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"git.intra.123u.com/rometa/romq/msg"
+	"git.intra.123u.com/rometa/romq/utils/snowflake"
+	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
 type ClientType int
@@ -331,13 +332,10 @@ func (c *client) processMsgHandshake(_msg *msg.Msg) {
 	c.name = handshake.Name
 	c.kind = ClientType(handshake.Type)
 	if handshake.Type == int32(CLIENT) {
-
 	} else if handshake.Type == int32(ROUTER) {
 		c.srv.addRoute(c, handshake.Name)
 	} else if handshake.Type == int32(SYSTEM) {
-
 	} else if handshake.Type == int32(ACCOUNT) {
-
 	} else {
 		nlog.Erro("processMsgHandshake: unknown type: %v", handshake.Type)
 		return

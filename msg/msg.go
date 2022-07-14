@@ -3,8 +3,9 @@ package msg
 import (
 	"bytes"
 	"encoding/binary"
-	nlog "github.com/abc463774475/my_tool/n_log"
 	"unsafe"
+
+	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
 var HeadSize uint32 = func() uint32 {

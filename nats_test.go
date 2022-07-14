@@ -1,9 +1,10 @@
 package main
 
 import (
-	nlog "github.com/abc463774475/my_tool/n_log"
 	"log"
 	"testing"
+
+	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
 func TestNats(t *testing.T) {

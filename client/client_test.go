@@ -1,9 +1,10 @@
 package client
 
 import (
-	"git.intra.123u.com/rometa/romq/msg"
 	"testing"
 	"time"
+
+	"git.intra.123u.com/rometa/romq/msg"
 )
 
 func TestClient_sub(t *testing.T) {

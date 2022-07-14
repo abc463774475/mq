@@ -1,11 +1,12 @@
 package server
 
 import (
+	"net"
+	"sync"
+
 	"git.intra.123u.com/rometa/romq/msg"
 	"git.intra.123u.com/rometa/romq/utils/snowflake"
 	nlog "github.com/abc463774475/my_tool/n_log"
-	"net"
-	"sync"
 )
 
 type server struct {
@@ -67,7 +68,7 @@ func (s *server) accept() {
 	for s.running {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			panic(err)
+			nlog.Erro("err %v", err)
 			continue
 		}
 		s.acceptOneConnection(conn, CLIENT)
@@ -195,7 +196,7 @@ func (s *server) snapshotSubs(c *client, snapShot *msg.MsgSnapshotSubs) {
 		}
 
 		acc := atemp.(*Account)
-		for k1, _ := range v.RM {
+		for k1 := range v.RM {
 			sub := &subscription{
 				client:  c,
 				subject: k1,
@@ -228,7 +229,7 @@ func (s *server) startRouterListener() {
 	for s.running {
 		conn, err := l.Accept()
 		if err != nil {
-			panic(err)
+			nlog.Erro("err  %v", err)
 			continue
 		}
 		s.acceptOneConnection(conn, ROUTER)

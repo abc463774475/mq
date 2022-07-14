@@ -1,9 +1,10 @@
 package server
 
 import (
+	"testing"
+
 	"git.intra.123u.com/rometa/romq/utils/snowflake"
 	nlog "github.com/abc463774475/my_tool/n_log"
-	"testing"
 )
 
 func TestServer_common(t *testing.T) {

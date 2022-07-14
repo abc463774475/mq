@@ -1,12 +1,13 @@
 package server
 
 import (
-	"git.intra.123u.com/rometa/romq/msg"
-	"git.intra.123u.com/rometa/romq/utils/snowflake"
-	nlog "github.com/abc463774475/my_tool/n_log"
 	"strconv"
 	"sync"
 	"time"
+
+	"git.intra.123u.com/rometa/romq/msg"
+	"git.intra.123u.com/rometa/romq/utils/snowflake"
+	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
 const (
