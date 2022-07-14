@@ -30,6 +30,9 @@ type server struct {
 
 	totalClients uint64
 
+	rwmRouter     sync.RWMutex
+	allRouterInfo map[string]*RouterInfo
+
 	// LameDuck mode
 	// 后端服务正在监听端口，并且可以服务请求，但是已经明确要求客户端停止发送请求。
 	// 当某个请求进入跛脚鸭状态时，它会将这个状态广播给所有已经连接的客户端。
@@ -50,6 +53,7 @@ func newServer(options ...Option) *server {
 	s.ldmCh = make(chan bool, 1)
 	s.shutdownComplete = make(chan struct{})
 	s.remotes = make(map[string]*client)
+	s.allRouterInfo = make(map[string]*RouterInfo)
 
 	s.gacc = NewAccount(globalAccountName)
 	s.registerAccount(s.gacc)
@@ -86,7 +90,7 @@ func (s *server) acceptOneConnection(conn net.Conn, kind ClientType) {
 	s.rwmClients.Unlock()
 
 	if kind == ROUTER {
-		s.addRoute(c, c.name)
+		// s.addRoute(c, c.name)
 	}
 }
 
@@ -99,7 +103,7 @@ func (s *server) start() {
 	}
 
 	if s.cfg.ConnectRouterAddr != "" {
-		s.connectToRoute()
+		s.connectToRoute(s.cfg.ConnectRouterAddr)
 	}
 
 	s.WaitForShutdown()
@@ -137,65 +141,6 @@ func (s *server) addRoute(c *client, name string) bool {
 	s.forwardNewRouteInfoToKnownServers(c)
 	return true
 }
-
-// 本身自己涵盖了所有subscribe的路由 ，所以只用一个 发送snapshot 过去就行了
-//func (s *server) sendSubsToRoute(route *client) {
-//	s.lock.Lock()
-//
-//	eSize := 0
-//	accs := make([]*Account, 0, 32)
-//	s.accounts.Range(func(key, value interface{}) bool {
-//		acc := value.(*Account)
-//		accs = append(accs, acc)
-//		acc.rwmu.RLock()
-//
-//		if ns := len(acc.rm); ns > 0 {
-//			eSize += ns * (len(acc.name) + 1 + 2)
-//			for key := range acc.rm {
-//				eSize += len(key) + 8
-//			}
-//		}
-//
-//		acc.rwmu.RUnlock()
-//		return true
-//	})
-//
-//	s.lock.Unlock()
-//
-//	buf := make([]byte, 0, eSize)
-//	route.mu.Lock()
-//	for _, a := range accs {
-//		a.rwmu.RLock()
-//
-//		for key, value := range a.rm {
-//			var subj, qn []byte
-//			s := strings.Split(key, " ")
-//			subj = []byte(s[0])
-//
-//			if len(s) > 1 {
-//				qn = []byte(s[1])
-//			}
-//
-//			sub := &subscription{
-//				client:  nil,
-//				subject: string(subj),
-//				queue:   qn,
-//				qw:      value,
-//				closed:  0,
-//			}
-//
-//			route.addRouteSubOrUnsubProtoToBuf(buf, a.name, sub, true)
-//		}
-//
-//		a.rwmu.RUnlock()
-//	}
-//
-//	route.mu.Unlock()
-//
-//	route.SendMsg(msg.MSG_SNAPSHOTSUBS, buf)
-//
-//	nlog.Info("send local subs to route %v  buf  %v", route.id, len(buf))
-//}
 
 func (s *server) sendSubsToRoute(route *client) {
 	all := s.getAllAccountInfo()
@@ -238,18 +183,25 @@ func (s *server) removeRoute(c *client) {
 	s.lock.Unlock()
 }
 
-func (s *server) snapshotSubs(snapShot *msg.MsgSnapshotSubs) {
+func (s *server) snapshotSubs(c *client, snapShot *msg.MsgSnapshotSubs) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	for _, acc := range snapShot.All {
-		nacc := NewAccount(acc.Name)
-
-		for k, v := range acc.RM {
-			nacc.rm[k] = v
+	for _, v := range snapShot.All {
+		atemp, ok := s.accounts.Load(v.Name)
+		if !ok {
+			nlog.Erro("snapshotSubs: account %v not found", v.Name)
+			continue
 		}
 
-		s.accounts.Store(acc.Name, nacc)
+		acc := atemp.(*Account)
+		for k1, _ := range v.RM {
+			sub := &subscription{
+				client:  c,
+				subject: k1,
+			}
+			acc.sl.Insert(sub)
+		}
 	}
 }
 
@@ -258,6 +210,7 @@ func (s *server) registerAccount(account *Account) {
 }
 
 func (s *server) updateRouteSubscriptionMap(acc *Account, sub *subscription) {
+	nlog.Erro("updateRouteSubscriptionMap: %v %v", acc.name, sub.subject)
 	for _, route := range s.routes {
 		route.sendRemoteNewSub(sub)
 	}
@@ -282,23 +235,66 @@ func (s *server) startRouterListener() {
 	}
 }
 
-func (s *server) connectToRoute() {
-	if s.cfg.ConnectRouterAddr == "" {
-		return
-	}
-
-	c := newConnectClient(s.cfg.ConnectRouterAddr)
+func (s *server) connectToRoute(addr string) {
+	c := newConnectClient(addr)
 	if !c.connect() {
 		nlog.Erro("connect error")
 		return
 	}
 	c.init()
 	c.srv = s
-	c.register()
+	c.acc = s.globalAccount()
+
+	_msg := &msg.MsgRegisterRouter{
+		RouterInfo: msg.RouterInfo{
+			Name:        s.cfg.Name,
+			ClientAddr:  s.cfg.Addr,
+			ClusterAddr: s.cfg.ClusterAddr,
+		},
+	}
+
+	c.SendMsg(msg.MSG_REGISTERROUTER, _msg)
+
 	go c.run()
 
 	// 把client 加入 server
 	s.lock.Lock()
 	s.routes[c.id] = c
 	s.lock.Unlock()
+}
+
+func (s *server) addRouterInfo(c *client, msg *msg.MsgRegisterRouter) {
+	s.rwmRouter.Lock()
+	defer s.rwmRouter.Unlock()
+	if _, ok := s.allRouterInfo[msg.Name]; ok {
+		nlog.Erro("addRouterInfo: router %v already in allRouterInfo", msg.Name)
+		return
+	}
+
+	s.allRouterInfo[msg.Name] = &RouterInfo{
+		ID:          msg.Name,
+		ListenAddr:  msg.ClientAddr,
+		ClusterAddr: msg.ClusterAddr,
+	}
+
+	s.addRoute(c, msg.Name)
+
+	nlog.Debug("addRouterInfo: %+v", msg)
+}
+
+func (s *server) getAllRouteInfos() []*RouterInfo {
+	s.rwmRouter.RLock()
+	defer s.rwmRouter.RUnlock()
+	ret := make([]*RouterInfo, 0, len(s.allRouterInfo))
+	for _, v := range s.allRouterInfo {
+		tmp := *v
+		ret = append(ret, &tmp)
+	}
+	return ret
+}
+
+func (s *server) addRouterInfos(all []*msg.RouterInfo) {
+	for _, v := range all {
+		s.connectToRoute(v.ClusterAddr)
+	}
 }

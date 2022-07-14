@@ -17,3 +17,29 @@ func TestServer_common(t *testing.T) {
 
 	nlog.Info("end")
 }
+
+func TestServer_route1(t *testing.T) {
+	snowflake.Init(1)
+	s := newServer(WithName("rout1"),
+		WithAddr(":8088"),
+		WithClusterAddr(":18088"),
+		WithConnectRouterAddr("127.0.0.1:18087"),
+	)
+
+	s.start()
+
+	nlog.Info("end")
+}
+
+func TestServer_route2(t *testing.T) {
+	snowflake.Init(1)
+	s := newServer(WithName("rout2"),
+		WithAddr(":8089"),
+		WithClusterAddr(":18089"),
+		WithConnectRouterAddr("127.0.0.1:18087"),
+	)
+
+	s.start()
+
+	nlog.Info("end")
+}

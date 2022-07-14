@@ -44,11 +44,11 @@ func (c *client) connect() bool {
 	}
 
 	nlog.Info("connect: %v", addr)
-	//c.register()
+
 	return true
 }
 
-func (c *client) register() {
+func (c *client) routerRegister() {
 	c.SendMsg(msg.MSG_HANDSHAKE, &msg.MsgHandshake{
 		Type: int32(c.kind),
 		Name: utils.GetSessionIDByTimer(),

@@ -7,6 +7,9 @@ const (
 	MSG_PING
 	MSG_PONG
 	MSG_HANDSHAKE
+
+	MSG_REGISTERROUTER
+
 	MSG_SNAPSHOTSUBS
 	MSG_SUB
 	MSG_PUB
@@ -14,6 +17,8 @@ const (
 
 	MSG_NEWROUTE
 	MSG_REMOTEROUTEADDSUB
+
+	MSG_CURALLROUTES
 )
 
 type MsgPing struct {
@@ -63,4 +68,18 @@ type MsgRemoteRouteAddSub struct {
 type MsgRoutePub struct {
 	Topic string `json:"topic"`
 	Data  []byte `json:"data"`
+}
+
+type RouterInfo struct {
+	Name        string `json:"name"`
+	ClientAddr  string `json:"clientAddr"`
+	ClusterAddr string `json:"clusterAddr"`
+}
+
+type MsgRegisterRouter struct {
+	RouterInfo
+}
+
+type MsgCurAllRoutes struct {
+	All []*RouterInfo `json:"all"`
 }

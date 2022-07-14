@@ -364,6 +364,10 @@ func (c *client) processMsgImpl(_msg *msg.Msg) {
 		c.processMsgRemoteRouteAddSub(_msg)
 	case msg.MSG_ROUTEPUB:
 		c.processMsgRoutePub(_msg)
+	case msg.MSG_REGISTERROUTER:
+		c.processMsgRegisterRouter(_msg)
+	case msg.MSG_CURALLROUTES:
+		c.processMsgCurAllRoutes(_msg)
 	}
 }
 
@@ -376,7 +380,7 @@ func (c *client) processMsgSnapshotSubs(_msg *msg.Msg) {
 		return
 	}
 
-	c.srv.snapshotSubs(snapshotSubs)
+	c.srv.snapshotSubs(c, snapshotSubs)
 }
 
 func (c *client) processMsgRoutePub(_msg *msg.Msg) {
@@ -466,14 +470,15 @@ func (c *client) msgPub(pub *msg.MsgPub) {
 }
 
 func (c *client) registerWithAccount(acc *Account) error {
-	//nlog.Erro("registerWithAccount: %v", acc.name)
+	nlog.Erro("client id %v registerWithAccount: %v", c.id, acc.name)
 	c.acc = acc
 	acc.addClient(c)
 	return nil
 }
 
 func (c *client) sendRemoteNewSub(sub *subscription) {
-	sub.client.SendMsg(msg.MSG_REMOTEROUTEADDSUB, &msg.MsgRemoteRouteAddSub{
+	nlog.Erro("sendRemoteNewSub: %v", sub.subject)
+	c.SendMsg(msg.MSG_REMOTEROUTEADDSUB, &msg.MsgRemoteRouteAddSub{
 		Name:  c.name,
 		Topic: sub.subject,
 	})
@@ -505,4 +510,39 @@ func (c *client) processMsgRemoteRouteAddSub(_msg *msg.Msg) {
 		closed:  0,
 	})
 	srv.lock.Unlock()
+}
+
+func (c *client) processMsgRegisterRouter(_msg *msg.Msg) {
+	registerRouter := &msg.MsgRegisterRouter{}
+	err := json.Unmarshal(_msg.Data, registerRouter)
+	if err != nil {
+		nlog.Erro("processMsgRegisterRouter: json.Unmarshal: %v", err)
+		return
+	}
+	c.srv.addRouterInfo(c, registerRouter)
+
+	all := c.srv.getAllRouteInfos()
+	retMsg := &msg.MsgCurAllRoutes{}
+	for _, route := range all {
+		if route.ID == registerRouter.Name {
+			continue
+		}
+		retMsg.All = append(retMsg.All, &msg.RouterInfo{
+			Name:        route.ID,
+			ClientAddr:  route.ListenAddr,
+			ClusterAddr: route.ClusterAddr,
+		})
+	}
+	// 同时要回信息
+	c.SendMsg(msg.MSG_CURALLROUTES, retMsg)
+}
+
+func (c *client) processMsgCurAllRoutes(_msg *msg.Msg) {
+	curAllRoutes := &msg.MsgCurAllRoutes{}
+	err := json.Unmarshal(_msg.Data, curAllRoutes)
+	if err != nil {
+		nlog.Erro("processMsgCurAllRoutes: json.Unmarshal: %v", err)
+		return
+	}
+	c.srv.addRouterInfos(curAllRoutes.All)
 }
