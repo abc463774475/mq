@@ -1,4 +1,4 @@
-package romq
+package main
 
 import (
 	nlog "github.com/abc463774475/my_tool/n_log"
