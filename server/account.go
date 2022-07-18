@@ -37,10 +37,11 @@ type Account struct {
 
 	clients map[*client]struct{}
 
-	rm map[string]int32
+	rm         map[string]int32
+	curAllSubs map[string]*subscription
 
 	rwmu sync.RWMutex
-	sqmu sync.Mutex
+	csmu sync.RWMutex
 }
 
 func NewAccount(name string) *Account {
@@ -62,6 +63,7 @@ func NewAccount(name string) *Account {
 func (a *Account) init() {
 	a.clients = make(map[*client]struct{})
 	a.rm = make(map[string]int32)
+	a.curAllSubs = make(map[string]*subscription, 10000)
 }
 
 func (a *Account) String() string {
@@ -92,6 +94,28 @@ func (a *Account) addRM(name string, value int32) {
 	a.rwmu.Unlock()
 }
 
+func (a *Account) addCurSubs(name string, sub *subscription) {
+	a.csmu.Lock()
+	if _, ok := a.curAllSubs[name]; ok {
+		nlog.Erro("Account.addCurSubs: name already added", name)
+		a.csmu.Unlock()
+		return
+	}
+	a.curAllSubs[name] = sub
+	a.csmu.Unlock()
+}
+
+func (a *Account) getAllCurSubs() []string {
+	a.csmu.RLock()
+	defer a.csmu.RUnlock()
+
+	ret := make([]string, 0, len(a.curAllSubs))
+	for name := range a.curAllSubs {
+		ret = append(ret, name)
+	}
+	return ret
+}
+
 func (a *Account) delRM(name string) {
 	a.rwmu.Lock()
 	if _, ok := a.rm[name]; !ok {
@@ -100,7 +124,22 @@ func (a *Account) delRM(name string) {
 		return
 	}
 	delete(a.rm, name)
+	a.sl.deleteSubs([]string{name})
+
 	a.rwmu.Unlock()
+}
+
+func (a *Account) delCurSubs(sub string) bool {
+	a.csmu.Lock()
+	if _, ok := a.curAllSubs[sub]; !ok {
+		nlog.Erro("Account.delCurSubs: subname not found", sub)
+		a.csmu.Unlock()
+		return false
+	}
+	delete(a.curAllSubs, sub)
+	a.csmu.Unlock()
+
+	return true
 }
 
 func (a *Account) getMsgAccounts() msg.Accounts {

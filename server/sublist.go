@@ -79,7 +79,7 @@ func (s *sublist) Insert(sub *subscription) error {
 		n = newNode()
 		s.root.nodes[sub.subject] = n
 
-		nlog.Erro("new node %v", sub.subject)
+		nlog.Debug("new node %v", sub.subject)
 	}
 
 	n.psubs[sub] = sub
@@ -91,11 +91,28 @@ func (s *sublist) Insert(sub *subscription) error {
 	return nil
 }
 
-func (s *sublist) match(topic string) *sublistResult {
+func (s *sublist) deleteSubs(subs []string) {
+	s.Lock()
+	defer s.Unlock()
+
+	for _, sub := range subs {
+		n := s.root.nodes[sub]
+		if n == nil {
+			continue
+		}
+
+		delete(s.root.nodes, sub)
+		nlog.Erro("sublist.deleteSub: %v", sub)
+
+		s.count--
+	}
+}
+
+func (s *sublist) match(sub string) *sublistResult {
 	s.RLock()
 	defer s.RUnlock()
 
-	n := s.root.nodes[topic]
+	n := s.root.nodes[sub]
 	if n == nil {
 		return nil
 	}

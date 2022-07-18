@@ -20,7 +20,8 @@ func TestServer_common(t *testing.T) {
 }
 
 func TestServer_route1(t *testing.T) {
-	snowflake.Init(1)
+	nlog.InitLog(nlog.WithCompressType(nlog.Quick))
+	snowflake.Init(2)
 	s := newServer(WithName("rout1"),
 		WithAddr(":8088"),
 		WithClusterAddr(":18088"),
@@ -33,7 +34,8 @@ func TestServer_route1(t *testing.T) {
 }
 
 func TestServer_route2(t *testing.T) {
-	snowflake.Init(1)
+	nlog.InitLog(nlog.WithCompressType(nlog.Quick))
+	snowflake.Init(3)
 	s := newServer(WithName("rout2"),
 		WithAddr(":8089"),
 		WithClusterAddr(":18089"),

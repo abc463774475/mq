@@ -214,5 +214,5 @@ func (c *Client) processMsgPub(_msg *msg.Msg) {
 		nlog.Erro("processMsgPub: json.Unmarshal: %v", err)
 		return
 	}
-	nlog.Debug("processMsgPub: %v  %v", pub.Topic, string(pub.Data))
+	nlog.Debug("processMsgPub: %v  %v", pub.Sub, string(pub.Data))
 }

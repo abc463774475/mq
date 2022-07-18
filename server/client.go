@@ -350,16 +350,20 @@ func (c *client) processMsgImpl(_msg *msg.Msg) {
 	case msg.MSG_PONG:
 		c.rtt = time.Now().Sub(c.rttStart)
 		nlog.Info("processMsgImpl: %v  rtt %v", _msg.Head.ID, c.rtt)
-	case msg.MSG_HANDSHAKE:
-		c.processMsgHandshake(_msg)
+	// case msg.MSG_HANDSHAKE:
+	//	c.processMsgHandshake(_msg)
 	case msg.MSG_SNAPSHOTSUBS:
 		c.processMsgSnapshotSubs(_msg)
 	case msg.MSG_SUB:
 		c.processMsgSub(_msg)
+	case msg.MSG_UNSUB:
+		c.processMsgUnSub(_msg)
 	case msg.MSG_PUB:
 		c.processMsgPub(_msg)
 	case msg.MSG_REMOTEROUTEADDSUB:
 		c.processMsgRemoteRouteAddSub(_msg)
+	case msg.MSG_REMOTEROUTEADDUNSUB:
+		c.processMsgRemoteRouteUnSub(_msg)
 	case msg.MSG_ROUTEPUB:
 		c.processMsgRoutePub(_msg)
 	case msg.MSG_REGISTERROUTER:
@@ -391,8 +395,8 @@ func (c *client) processMsgRoutePub(_msg *msg.Msg) {
 	}
 
 	c.msgPub(&msg.MsgPub{
-		Topic: routePub.Topic,
-		Data:  routePub.Data,
+		Sub:  routePub.Sub,
+		Data: routePub.Data,
 	})
 }
 
@@ -407,7 +411,7 @@ func (c *client) processMsgSub(_msg *msg.Msg) {
 
 	sub := &subscription{
 		client:  c,
-		subject: msub.Topic,
+		subject: msub.Sub,
 		queue:   nil,
 		qw:      0,
 		closed:  0,
@@ -421,8 +425,10 @@ func (c *client) processMsgSub(_msg *msg.Msg) {
 	if ts == nil {
 		c.subs[sid] = sub
 		acc.addRM(sub.subject, 1)
+		acc.addCurSubs(sub.subject, sub)
 		err := acc.sl.Insert(sub)
 		if err != nil {
+			acc.delRM(sub.subject)
 			delete(c.subs, sid)
 		}
 	}
@@ -433,6 +439,34 @@ func (c *client) processMsgSub(_msg *msg.Msg) {
 	kind := c.kind
 	if kind == CLIENT {
 		srv.updateRouteSubscriptionMap(acc, sub)
+	}
+}
+
+func (c *client) processMsgUnSub(_msg *msg.Msg) {
+	usub := &msg.MsgUnSub{}
+	err := json.Unmarshal(_msg.Data, usub)
+	if err != nil {
+		nlog.Erro("processMsgUnSub: json.Unmarshal: %v", err)
+		return
+	}
+	acc := c.acc
+	for _, sub := range usub.Subs {
+		c.mu.Lock()
+		bret := acc.delCurSubs(sub)
+		if !bret {
+			c.mu.Unlock()
+			return
+		}
+
+		acc.delRM(sub)
+		c.in.subs--
+		c.mu.Unlock()
+	}
+
+	srv := c.srv
+	kind := c.kind
+	if kind == CLIENT {
+		srv.updateRouteUnSubscriptionMap(usub.Subs)
 	}
 }
 
@@ -449,9 +483,9 @@ func (c *client) processMsgPub(_msg *msg.Msg) {
 }
 
 func (c *client) msgPub(pub *msg.MsgPub) {
-	r := c.acc.sl.match(pub.Topic)
+	r := c.acc.sl.match(pub.Sub)
 	if r == nil {
-		nlog.Erro("processMsgPub: match not exist: %v", pub.Topic)
+		nlog.Erro("processMsgPub: match not exist: %v", pub.Sub)
 		return
 	}
 
@@ -459,26 +493,33 @@ func (c *client) msgPub(pub *msg.MsgPub) {
 		if sub.client.kind == CLIENT {
 			sub.client.SendMsg(msg.MSG_PUB, pub)
 		} else if sub.client.kind == ROUTER {
-			sub.client.SendMsg(msg.MSG_REMOTEROUTEADDSUB, &msg.MsgRoutePub{
-				Topic: pub.Topic,
-				Data:  pub.Data,
+			sub.client.SendMsg(msg.MSG_ROUTEPUB, &msg.MsgRoutePub{
+				Sub:  pub.Sub,
+				Data: pub.Data,
 			})
 		}
 	}
 }
 
 func (c *client) registerWithAccount(acc *Account) error {
-	nlog.Erro("client id %v registerWithAccount: %v", c.id, acc.name)
+	nlog.Debug("client id %v registerWithAccount: %v", c.id, acc.name)
 	c.acc = acc
 	acc.addClient(c)
 	return nil
 }
 
 func (c *client) sendRemoteNewSub(sub *subscription) {
-	nlog.Erro("sendRemoteNewSub: %v", sub.subject)
+	nlog.Debug("sendRemoteNewSub: %v", sub.subject)
 	c.SendMsg(msg.MSG_REMOTEROUTEADDSUB, &msg.MsgRemoteRouteAddSub{
-		Name:  c.name,
-		Topic: sub.subject,
+		Name: c.name,
+		Subs: []string{sub.subject},
+	})
+}
+
+func (c *client) sendRemoteUnSub(subs []string) {
+	nlog.Debug("sendRemoteNewSub: %v", subs)
+	c.SendMsg(msg.MSG_REMOTEROUTEADDUNSUB, &msg.MsgRemoteRouteAddUnsub{
+		Subs: subs,
 	})
 }
 
@@ -487,7 +528,6 @@ func (c *client) processMsgRemoteRouteAddSub(_msg *msg.Msg) {
 	err := json.Unmarshal(_msg.Data, remoteNewSub)
 	if err != nil {
 		nlog.Erro("processRemoteNewSub: json.Unmarshal: %v", err)
-		// c.closeConnection(readError)
 		return
 	}
 
@@ -499,14 +539,20 @@ func (c *client) processMsgRemoteRouteAddSub(_msg *msg.Msg) {
 
 	srv := c.srv
 	srv.lock.Lock()
-	acc.addRM(remoteNewSub.Topic, 1)
-	err = acc.sl.Insert(&subscription{
-		client:  c,
-		subject: remoteNewSub.Topic,
-		queue:   nil,
-		qw:      0,
-		closed:  0,
-	})
+	for _, sub := range remoteNewSub.Subs {
+		acc.addRM(sub, 1)
+		err = acc.sl.Insert(&subscription{
+			client:  c,
+			subject: sub,
+			queue:   nil,
+			qw:      0,
+			closed:  0,
+		})
+		if err != nil {
+			nlog.Erro("111111")
+			continue
+		}
+	}
 	srv.lock.Unlock()
 }
 
@@ -543,4 +589,24 @@ func (c *client) processMsgCurAllRoutes(_msg *msg.Msg) {
 		return
 	}
 	c.srv.addRouterInfos(curAllRoutes.All)
+}
+
+func (c *client) processMsgRemoteRouteUnSub(_msg *msg.Msg) {
+	remoteUnSub := &msg.MsgRemoteRouteAddUnsub{}
+	err := json.Unmarshal(_msg.Data, remoteUnSub)
+	if err != nil {
+		nlog.Erro("processRemoteUnSub: json.Unmarshal: %v", err)
+		// c.closeConnection(readError)
+		return
+	}
+
+	acc := c.acc
+	if acc == nil {
+		nlog.Erro("processRemoteUnSub: acc is nil")
+		return
+	}
+
+	for _, sub := range remoteUnSub.Subs {
+		acc.delRM(sub)
+	}
 }

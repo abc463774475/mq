@@ -2,6 +2,7 @@ package msg
 
 type MSGID int32
 
+//go:generate go-enum -f -x   -n MSGID -o msg_enum.go
 const (
 	MSG_START MSGID = iota + 1
 	MSG_PING
@@ -11,12 +12,16 @@ const (
 	MSG_REGISTERROUTER
 
 	MSG_SNAPSHOTSUBS
+
 	MSG_SUB
+	MSG_UNSUB
+
 	MSG_PUB
 	MSG_ROUTEPUB
 
 	MSG_NEWROUTE
 	MSG_REMOTEROUTEADDSUB
+	MSG_REMOTEROUTEADDUNSUB
 
 	MSG_CURALLROUTES
 )
@@ -35,14 +40,18 @@ type MsgSnapshot struct {
 }
 
 type MsgSub struct {
-	Topic string `json:"topic"`
+	Sub string `json:"sub"`
 	// SID sequence id
 	SID string `json:"sid"`
 }
 
+type MsgUnSub struct {
+	Subs []string `json:"subs"`
+}
+
 type MsgPub struct {
-	Topic string `json:"topic"`
-	Data  []byte `json:"data"`
+	Sub  string `json:"sub"`
+	Data []byte `json:"data"`
 }
 
 type MsgSnapshotSubs struct {
@@ -59,13 +68,13 @@ type Accounts struct {
 }
 
 type MsgRemoteRouteAddSub struct {
-	Name  string `json:"name"`
-	Topic string `json:"topic"`
+	Name string   `json:"name"`
+	Subs []string `json:"subs"`
 }
 
 type MsgRoutePub struct {
-	Topic string `json:"topic"`
-	Data  []byte `json:"data"`
+	Sub  string `json:"sub"`
+	Data []byte `json:"data"`
 }
 
 type RouterInfo struct {
@@ -80,4 +89,8 @@ type MsgRegisterRouter struct {
 
 type MsgCurAllRoutes struct {
 	All []*RouterInfo `json:"all"`
+}
+
+type MsgRemoteRouteAddUnsub struct {
+	Subs []string `json:"subs"`
 }

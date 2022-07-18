@@ -5,8 +5,6 @@ import (
 	"net"
 	"time"
 
-	"git.intra.123u.com/rometa/romq/msg"
-	"git.intra.123u.com/rometa/romq/utils"
 	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
@@ -49,9 +47,9 @@ func (c *client) connect() bool {
 	return true
 }
 
-func (c *client) routerRegister() {
-	c.SendMsg(msg.MSG_HANDSHAKE, &msg.MsgHandshake{
-		Type: int32(c.kind),
-		Name: utils.GetSessionIDByTimer(),
-	})
-}
+//func (c *client) routerRegister() {
+//	c.SendMsg(msg.MSG_HANDSHAKE, &msg.MsgHandshake{
+//		Type: int32(c.kind),
+//		Name: utils.GetSessionIDByTimer(),
+//	})
+//}

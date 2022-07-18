@@ -146,6 +146,11 @@ func (s *server) addRoute(c *client, name string) bool {
 func (s *server) sendSubsToRoute(route *client) {
 	all := s.getAllAccountInfo()
 	route.SendMsg(msg.MSG_SNAPSHOTSUBS, &msg.MsgSnapshotSubs{All: all})
+
+	route.SendMsg(msg.MSG_REMOTEROUTEADDSUB, &msg.MsgRemoteRouteAddSub{
+		Name: s.globalAccount().name,
+		Subs: s.globalAccount().getAllCurSubs(),
+	})
 }
 
 // 获取所有Account的信息
@@ -188,22 +193,19 @@ func (s *server) snapshotSubs(c *client, snapShot *msg.MsgSnapshotSubs) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	for _, v := range snapShot.All {
-		atemp, ok := s.accounts.Load(v.Name)
-		if !ok {
-			nlog.Erro("snapshotSubs: account %v not found", v.Name)
-			continue
-		}
-
-		acc := atemp.(*Account)
-		for k1 := range v.RM {
-			sub := &subscription{
-				client:  c,
-				subject: k1,
-			}
-			acc.sl.Insert(sub)
-		}
-	}
+	//for _, v := range snapShot.All {
+	//	atemp, ok := s.accounts.Load(v.Name)
+	//	if !ok {
+	//		nlog.Erro("snapshotSubs: account %v not found", v.Name)
+	//		continue
+	//	}
+	//
+	//	nlog.Erro("snapshotSubs: account %+v", v)
+	//	acc := atemp.(*Account)
+	//	for k1, v1 := range v.RM {
+	//		acc.rm[k1] = v1
+	//	}
+	//}
 }
 
 func (s *server) registerAccount(account *Account) {
@@ -211,9 +213,15 @@ func (s *server) registerAccount(account *Account) {
 }
 
 func (s *server) updateRouteSubscriptionMap(acc *Account, sub *subscription) {
-	nlog.Erro("updateRouteSubscriptionMap: %v %v", acc.name, sub.subject)
+	nlog.Debug("updateRouteSubscriptionMap: %v %v", acc.name, sub.subject)
 	for _, route := range s.routes {
 		route.sendRemoteNewSub(sub)
+	}
+}
+
+func (s *server) updateRouteUnSubscriptionMap(subs []string) {
+	for _, route := range s.routes {
+		route.sendRemoteUnSub(subs)
 	}
 }
 
@@ -245,6 +253,7 @@ func (s *server) connectToRoute(addr string) {
 	c.init()
 	c.srv = s
 	c.acc = s.globalAccount()
+	c.kind = ROUTER
 
 	_msg := &msg.MsgRegisterRouter{
 		RouterInfo: msg.RouterInfo{
