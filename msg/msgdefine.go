@@ -88,7 +88,8 @@ type MsgRegisterRouter struct {
 }
 
 type MsgCurAllRoutes struct {
-	All []*RouterInfo `json:"all"`
+	RemoteName string        `json:"remoteName"`
+	All        []*RouterInfo `json:"all"`
 }
 
 type MsgRemoteRouteAddUnsub struct {

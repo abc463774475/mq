@@ -11,16 +11,10 @@ func TestClient_sub(t *testing.T) {
 	sub := "haorena"
 
 	c := newClient("localhost:8088", 0)
-	time.AfterFunc(2*time.Second, func() {
+	time.AfterFunc(1*time.Second, func() {
 		c.SendMsg(msg.MSG_SUB, msg.MsgSub{
 			Sub: sub,
 			SID: "1",
-		})
-	})
-
-	time.AfterFunc(5*time.Second, func() {
-		c.SendMsg(msg.MSG_UNSUB, msg.MsgUnSub{
-			Subs: []string{sub},
 		})
 	})
 

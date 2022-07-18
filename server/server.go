@@ -31,8 +31,8 @@ type server struct {
 
 	totalClients uint64
 
-	rwmRouter     sync.RWMutex
-	allRouterInfo map[string]*RouterInfo
+	rwmRouter         sync.RWMutex
+	allRouterConfInfo map[string]*RouterConfInfo
 
 	// LameDuck mode
 	// 后端服务正在监听端口，并且可以服务请求，但是已经明确要求客户端停止发送请求。
@@ -54,7 +54,7 @@ func newServer(options ...Option) *server {
 	s.ldmCh = make(chan bool, 1)
 	s.shutdownComplete = make(chan struct{})
 	s.remotes = make(map[string]*client)
-	s.allRouterInfo = make(map[string]*RouterInfo)
+	s.allRouterConfInfo = make(map[string]*RouterConfInfo)
 
 	s.gacc = NewAccount(globalAccountName)
 	s.registerAccount(s.gacc)
@@ -62,7 +62,7 @@ func newServer(options ...Option) *server {
 	return s
 }
 
-func (s *server) accept() {
+func (s *server) startClientListener() {
 	s.listener, _ = net.Listen("tcp", s.cfg.Addr)
 	s.running = true
 	for s.running {
@@ -76,7 +76,7 @@ func (s *server) accept() {
 }
 
 func (s *server) acceptOneConnection(conn net.Conn, kind ClientType) {
-	nlog.Info("accept one connection %v", conn.RemoteAddr())
+	nlog.Info("acceptOneConnection %v", conn.RemoteAddr())
 	id := snowflake.GetID()
 	c := newAcceptClient(id, conn, s)
 	c.kind = kind
@@ -97,14 +97,14 @@ func (s *server) acceptOneConnection(conn net.Conn, kind ClientType) {
 
 func (s *server) start() {
 	nlog.Info("start server  %v %v", s.cfg.Addr, s.cfg.ClusterAddr)
-	go s.accept()
+	go s.startClientListener()
 
 	if s.cfg.ClusterAddr != "" {
 		go s.startRouterListener()
 	}
 
 	if s.cfg.ConnectRouterAddr != "" {
-		s.connectToRoute(s.cfg.ConnectRouterAddr)
+		s.connectToRoute("", s.cfg.ConnectRouterAddr)
 	}
 
 	s.WaitForShutdown()
@@ -184,9 +184,23 @@ func (s *server) forwardNewRouteInfoToKnownServers(route2 *client) {
 
 func (s *server) removeRoute(c *client) {
 	s.lock.Lock()
+	if _, ok := s.routes[c.id]; !ok {
+		s.lock.Unlock()
+		nlog.Erro("removeRoute: client %v not in routes", c.id)
+		return
+	}
+
+	if _, ok := s.remotes[c.name]; !ok {
+		s.lock.Unlock()
+		nlog.Erro("removeRoute: name %v not in remotes", c.name)
+		return
+	}
+
 	delete(s.routes, c.id)
 	delete(s.remotes, c.name)
 	s.lock.Unlock()
+
+	nlog.Erro("removeRoute: %v", c.name)
 }
 
 func (s *server) snapshotSubs(c *client, snapShot *msg.MsgSnapshotSubs) {
@@ -244,7 +258,19 @@ func (s *server) startRouterListener() {
 	}
 }
 
-func (s *server) connectToRoute(addr string) {
+func (s *server) addRemoteName(c *client, rname string) {
+	nlog.Erro("addRemoteName: %v %v", c.id, rname)
+	s.lock.Lock()
+	if _, ok := s.routes[c.id]; !ok {
+		nlog.Erro("addRemoteName: client %v not in routes", c.id)
+		s.lock.Unlock()
+		return
+	}
+	s.remotes[rname] = c
+	s.lock.Unlock()
+}
+
+func (s *server) connectToRoute(name string, addr string) {
 	c := newConnectClient(addr)
 	if !c.connect() {
 		nlog.Erro("connect error")
@@ -270,18 +296,21 @@ func (s *server) connectToRoute(addr string) {
 	// 把client 加入 server
 	s.lock.Lock()
 	s.routes[c.id] = c
+	if name != "" {
+		s.remotes[name] = c
+	}
 	s.lock.Unlock()
 }
 
-func (s *server) addRouterInfo(c *client, msg *msg.MsgRegisterRouter) {
+func (s *server) addRouterConfInfo(c *client, msg *msg.MsgRegisterRouter) {
 	s.rwmRouter.Lock()
 	defer s.rwmRouter.Unlock()
-	if _, ok := s.allRouterInfo[msg.Name]; ok {
-		nlog.Erro("addRouterInfo: router %v already in allRouterInfo", msg.Name)
-		return
+	if _, ok := s.allRouterConfInfo[msg.Name]; ok {
+		nlog.Debug("addRouterConfInfo: router %v already in allRouterConfInfo", msg.Name)
+		// return
 	}
 
-	s.allRouterInfo[msg.Name] = &RouterInfo{
+	s.allRouterConfInfo[msg.Name] = &RouterConfInfo{
 		ID:          msg.Name,
 		ListenAddr:  msg.ClientAddr,
 		ClusterAddr: msg.ClusterAddr,
@@ -292,11 +321,11 @@ func (s *server) addRouterInfo(c *client, msg *msg.MsgRegisterRouter) {
 	nlog.Debug("addRouterInfo: %+v", msg)
 }
 
-func (s *server) getAllRouteInfos() []*RouterInfo {
+func (s *server) getAllRouteInfos() []*RouterConfInfo {
 	s.rwmRouter.RLock()
 	defer s.rwmRouter.RUnlock()
-	ret := make([]*RouterInfo, 0, len(s.allRouterInfo))
-	for _, v := range s.allRouterInfo {
+	ret := make([]*RouterConfInfo, 0, len(s.allRouterConfInfo))
+	for _, v := range s.allRouterConfInfo {
 		tmp := *v
 		ret = append(ret, &tmp)
 	}
@@ -305,6 +334,6 @@ func (s *server) getAllRouteInfos() []*RouterInfo {
 
 func (s *server) addRouterInfos(all []*msg.RouterInfo) {
 	for _, v := range all {
-		s.connectToRoute(v.ClusterAddr)
+		s.connectToRoute(v.Name, v.ClusterAddr)
 	}
 }

@@ -16,7 +16,7 @@ import (
 
 type ClientType int
 
-// type of client connection
+//go:generate go run github.com/dmarkham/enumer -type=ClientType
 const (
 	CLIENT ClientType = iota
 	ROUTER
@@ -36,6 +36,7 @@ const (
 
 type clientFlag int
 
+//go:generate go run github.com/dmarkham/enumer -type=clientFlag
 const (
 	handshake clientFlag = 1 << iota
 	readOnly
@@ -126,8 +127,9 @@ type client struct {
 
 	addr string
 
-	subs   map[string]*subscription
-	mperms *msgDeny
+	subs        map[string]*subscription
+	subsWithSID map[string]*subscription
+	mperms      *msgDeny
 
 	rtt      time.Duration
 	rttStart time.Time
@@ -159,14 +161,43 @@ func newConnectClient(addr string) *client {
 }
 
 func (c *client) init() {
-	c.subs = make(map[string]*subscription)
+	c.subs = make(map[string]*subscription, 100)
+	c.subsWithSID = make(map[string]*subscription, 100)
 	c.mperms = &msgDeny{}
 	c.msgRecv = make(chan *msg.Msg, 200)
 	c.msgSend = make(chan *msg.Msg, 200)
-	c.cquit = make(chan struct{}, 1)
+	c.cquit = make(chan struct{}, 2)
+}
+
+func (c *client) run() {
+	nlog.Info("client run")
+	defer func() {
+		nlog.Info("client run end")
+	}()
+
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		c.readLoop()
+		wg.Done()
+	}()
+	go func() {
+		c.writeLoop()
+		wg.Done()
+	}()
+
+	c.processMsg()
+
+	c.del()
+	wg.Wait()
 }
 
 func (c *client) readLoop() {
+	nlog.Info("client readLoop")
+	defer func() {
+		nlog.Info("client readLoop end")
+	}()
 	for {
 		headeBytes := make([]byte, msg.HeadSize)
 		n, err := io.ReadFull(c.nc, headeBytes)
@@ -203,6 +234,10 @@ func (c *client) readLoop() {
 }
 
 func (c *client) writeLoop() {
+	nlog.Info("client writeLoop")
+	defer func() {
+		nlog.Info("client writeLoop end")
+	}()
 	for {
 		select {
 		case msg := <-c.msgSend:
@@ -242,45 +277,22 @@ func (c *client) writeMsg(msg *msg.Msg) error {
 func (c *client) closeConnection(state closeState) {
 	nlog.Info("closeConnection: %v", state)
 	c.nc.Close()
+	close(c.cquit)
 }
 
 func (c *client) processMsg() {
+	nlog.Info("client processMsg")
+	defer func() {
+		nlog.Info("client processMsg end")
+	}()
 	for {
 		select {
 		case msg := <-c.msgRecv:
 			c.processMsgImpl(msg)
+		case <-c.cquit:
+			return
 		}
 	}
-}
-
-func (c *client) run() {
-	// Set the read deadline for the client.
-	// Start reading.
-	nlog.Info("client run")
-	defer func() {
-		nlog.Info("client run end")
-		c.closeConnection(clientClosed)
-	}()
-
-	//if c.isServerAccept {
-	//	c.connect()
-	//}
-
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
-
-	go func() {
-		c.readLoop()
-		wg.Done()
-	}()
-	go func() {
-		c.writeLoop()
-		wg.Done()
-	}()
-
-	c.processMsg()
-
-	wg.Wait()
 }
 
 func (c *client) SendMsg(msgID msg.MSGID, i interface{}) {
@@ -325,7 +337,6 @@ func (c *client) processMsgHandshake(_msg *msg.Msg) {
 	err := json.Unmarshal(_msg.Data, handshake)
 	if err != nil {
 		nlog.Erro("processMsgHandshake: json.Unmarshal: %v", err)
-		c.closeConnection(readError)
 		return
 	}
 
@@ -378,7 +389,6 @@ func (c *client) processMsgSnapshotSubs(_msg *msg.Msg) {
 	err := json.Unmarshal(_msg.Data, snapshotSubs)
 	if err != nil {
 		nlog.Erro("processMsgSnapshotSubs: json.Unmarshal: %v", err)
-		c.closeConnection(readError)
 		return
 	}
 
@@ -390,7 +400,6 @@ func (c *client) processMsgRoutePub(_msg *msg.Msg) {
 	err := json.Unmarshal(_msg.Data, routePub)
 	if err != nil {
 		nlog.Erro("processMsgRoutePub: json.Unmarshal: %v", err)
-		c.closeConnection(readError)
 		return
 	}
 
@@ -405,7 +414,6 @@ func (c *client) processMsgSub(_msg *msg.Msg) {
 	err := json.Unmarshal(_msg.Data, msub)
 	if err != nil {
 		nlog.Erro("processMsgSub: json.Unmarshal: %v", err)
-		c.closeConnection(readError)
 		return
 	}
 
@@ -421,16 +429,22 @@ func (c *client) processMsgSub(_msg *msg.Msg) {
 	c.in.subs++
 	sid := msub.SID
 
-	ts := c.subs[sid]
+	ts := c.subsWithSID[sid]
+	// 这是序列号的重复检查
 	if ts == nil {
-		c.subs[sid] = sub
+		c.subsWithSID[sid] = sub
 		acc.addRM(sub.subject, 1)
 		acc.addCurSubs(sub.subject, sub)
 		err := acc.sl.Insert(sub)
 		if err != nil {
 			acc.delRM(sub.subject)
-			delete(c.subs, sid)
+			delete(c.subsWithSID, sid)
+			delete(c.subs, sub.subject)
+			c.mu.Unlock()
+			return
 		}
+
+		c.subs[sub.subject] = sub
 	}
 
 	srv := c.srv
@@ -449,25 +463,8 @@ func (c *client) processMsgUnSub(_msg *msg.Msg) {
 		nlog.Erro("processMsgUnSub: json.Unmarshal: %v", err)
 		return
 	}
-	acc := c.acc
-	for _, sub := range usub.Subs {
-		c.mu.Lock()
-		bret := acc.delCurSubs(sub)
-		if !bret {
-			c.mu.Unlock()
-			return
-		}
 
-		acc.delRM(sub)
-		c.in.subs--
-		c.mu.Unlock()
-	}
-
-	srv := c.srv
-	kind := c.kind
-	if kind == CLIENT {
-		srv.updateRouteUnSubscriptionMap(usub.Subs)
-	}
+	c.UnSub(usub.Subs, true)
 }
 
 func (c *client) processMsgPub(_msg *msg.Msg) {
@@ -475,7 +472,6 @@ func (c *client) processMsgPub(_msg *msg.Msg) {
 	err := json.Unmarshal(_msg.Data, pub)
 	if err != nil {
 		nlog.Erro("processMsgPub: json.Unmarshal: %v", err)
-		c.closeConnection(readError)
 		return
 	}
 
@@ -540,14 +536,16 @@ func (c *client) processMsgRemoteRouteAddSub(_msg *msg.Msg) {
 	srv := c.srv
 	srv.lock.Lock()
 	for _, sub := range remoteNewSub.Subs {
-		acc.addRM(sub, 1)
-		err = acc.sl.Insert(&subscription{
+		_sub := &subscription{
 			client:  c,
 			subject: sub,
 			queue:   nil,
 			qw:      0,
 			closed:  0,
-		})
+		}
+		c.subs[sub] = _sub
+		acc.addRM(sub, 1)
+		err = acc.sl.Insert(_sub)
 		if err != nil {
 			nlog.Erro("111111")
 			continue
@@ -563,10 +561,13 @@ func (c *client) processMsgRegisterRouter(_msg *msg.Msg) {
 		nlog.Erro("processMsgRegisterRouter: json.Unmarshal: %v", err)
 		return
 	}
-	c.srv.addRouterInfo(c, registerRouter)
+	c.name = registerRouter.Name
+	c.srv.addRouterConfInfo(c, registerRouter)
 
 	all := c.srv.getAllRouteInfos()
-	retMsg := &msg.MsgCurAllRoutes{}
+	retMsg := &msg.MsgCurAllRoutes{
+		RemoteName: c.srv.cfg.Name,
+	}
 	for _, route := range all {
 		if route.ID == registerRouter.Name {
 			continue
@@ -588,6 +589,7 @@ func (c *client) processMsgCurAllRoutes(_msg *msg.Msg) {
 		nlog.Erro("processMsgCurAllRoutes: json.Unmarshal: %v", err)
 		return
 	}
+	c.srv.addRemoteName(c, curAllRoutes.RemoteName)
 	c.srv.addRouterInfos(curAllRoutes.All)
 }
 
@@ -596,7 +598,6 @@ func (c *client) processMsgRemoteRouteUnSub(_msg *msg.Msg) {
 	err := json.Unmarshal(_msg.Data, remoteUnSub)
 	if err != nil {
 		nlog.Erro("processRemoteUnSub: json.Unmarshal: %v", err)
-		// c.closeConnection(readError)
 		return
 	}
 

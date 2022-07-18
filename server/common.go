@@ -9,7 +9,7 @@ type stats struct {
 	slowConsumers int64
 }
 
-type RouterInfo struct {
+type RouterConfInfo struct {
 	ID          string `json:"id"`
 	ListenAddr  string `json:"listenAddr"`
 	ClusterAddr string `json:"clusterAddr"`

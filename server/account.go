@@ -35,13 +35,14 @@ type Account struct {
 
 	sl *sublist
 
-	clients map[*client]struct{}
-
 	rm         map[string]int32
 	curAllSubs map[string]*subscription
 
 	rwmu sync.RWMutex
 	csmu sync.RWMutex
+
+	clients  map[*client]struct{}
+	clientMu sync.Mutex
 }
 
 func NewAccount(name string) *Account {
@@ -75,12 +76,26 @@ func (a *Account) setCurClient(client2 *client) {
 }
 
 func (a *Account) addClient(c *client) {
+	a.clientMu.Lock()
 	if _, ok := a.clients[c]; ok {
-		nlog.Erro("Account.addClient: client already added", c)
+		nlog.Erro("Account.addClient: client already added %v", c)
+		a.clientMu.Unlock()
 		return
 	}
 	a.clients[c] = struct{}{}
 	nlog.Debug("Account.addClient: added client %v", a.name)
+	a.clientMu.Unlock()
+}
+
+func (a *Account) delClient(c *client) {
+	a.clientMu.Lock()
+	if _, ok := a.clients[c]; !ok {
+		nlog.Erro("Account.delClient: client not found", c)
+		a.clientMu.Unlock()
+		return
+	}
+	delete(a.clients, c)
+	a.clientMu.Unlock()
 }
 
 func (a *Account) addRM(name string, value int32) {
