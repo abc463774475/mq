@@ -77,7 +77,7 @@ func (c *Client) writeLoop() {
 	for {
 		select {
 		case msg := <-c.msgSend:
-			c.writeMsg(msg)
+			_ = c.writeMsg(msg)
 		case <-c.cquit:
 			return
 		}
@@ -103,7 +103,7 @@ func (c *Client) writeMsg(msg *msg.Msg) error {
 		}
 
 		if n1 != len(data[n:]) {
-			return errors.New(fmt.Sprintf("writeMsg: write 0 bytes %v", n1))
+			return fmt.Errorf("writeMsg: write 0 bytes %v", n1)
 		}
 
 	}
@@ -115,6 +115,7 @@ func (c *Client) closeConnection() {
 }
 
 func (c *Client) processMsg() {
+	//nolint:gosimple
 	for {
 		select {
 		case msg := <-c.msgRecv:

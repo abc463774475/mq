@@ -8,7 +8,7 @@ func (c *client) del() {
 
 	if c.kind == CLIENT {
 		subs := []string{}
-		for k, _ := range c.subs {
+		for k := range c.subs {
 			subs = append(subs, k)
 		}
 
@@ -19,7 +19,7 @@ func (c *client) del() {
 		// 2. unsubscribe from all routes
 		// 3. client lib redirect, reconnect TODO: 这里需要更新路由的订阅关系，主要工作集成在 client lib 中。需要保存自己所有的订阅关系
 		subs := []string{}
-		for k, _ := range c.subs {
+		for k := range c.subs {
 			subs = append(subs, k)
 		}
 

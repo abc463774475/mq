@@ -82,7 +82,7 @@ func (s *server) acceptOneConnection(conn net.Conn, kind ClientType) {
 	c.kind = kind
 	c.init()
 
-	c.registerWithAccount(s.globalAccount())
+	_ = c.registerWithAccount(s.globalAccount())
 
 	s.rwmClients.Lock()
 
@@ -90,9 +90,9 @@ func (s *server) acceptOneConnection(conn net.Conn, kind ClientType) {
 	s.clients[id] = c
 	s.rwmClients.Unlock()
 
-	if kind == ROUTER {
-		// s.addRoute(c, c.name)
-	}
+	//if kind == ROUTER {
+	//	// s.addRoute(c, c.name)
+	//}
 }
 
 func (s *server) start() {

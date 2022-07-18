@@ -31,6 +31,7 @@ type msgDeny struct {
 }
 
 const (
+	//nolint:varcheck
 	maxBuffersSize = 1024 * 1024 * 64
 )
 
@@ -67,7 +68,9 @@ func (cf *clientFlag) setIfNotSet(c clientFlag) bool {
 type closeState int
 
 const (
+	//nolint:varcheck
 	clientClosed closeState = iota + 1
+	//nolint:varcheck
 	writeError
 	readError
 )
@@ -241,7 +244,7 @@ func (c *client) writeLoop() {
 	for {
 		select {
 		case msg := <-c.msgSend:
-			c.writeMsg(msg)
+			_ = c.writeMsg(msg)
 		case <-c.cquit:
 			return
 		}
@@ -267,7 +270,7 @@ func (c *client) writeMsg(msg *msg.Msg) error {
 		}
 
 		if n1 != len(data[n:]) {
-			return errors.New(fmt.Sprintf("writeMsg: write 0 bytes %v", n1))
+			return fmt.Errorf("writeMsg: write 0 bytes %v", n1)
 		}
 
 	}
@@ -359,7 +362,7 @@ func (c *client) processMsgImpl(_msg *msg.Msg) {
 	case msg.MSG_PING:
 		c.SendMsg(msg.MSG_PONG, msg.MsgPong{})
 	case msg.MSG_PONG:
-		c.rtt = time.Now().Sub(c.rttStart)
+		c.rtt = time.Since(c.rttStart)
 		nlog.Info("processMsgImpl: %v  rtt %v", _msg.Head.ID, c.rtt)
 	// case msg.MSG_HANDSHAKE:
 	//	c.processMsgHandshake(_msg)
