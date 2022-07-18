@@ -2,7 +2,7 @@ package msg
 
 type MSGID int32
 
-//go:generate go-enum -f -x   -n MSGID -o msg_enum.go
+//go:generate go run github.com/dmarkham/enumer -type=MSGID
 const (
 	MSG_START MSGID = iota + 1
 	MSG_PING
