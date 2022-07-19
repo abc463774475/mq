@@ -1,5 +1,7 @@
 package msg
 
+import "time"
+
 type MSGID int32
 
 //go:generate go run github.com/dmarkham/enumer -type=MSGID
@@ -26,7 +28,9 @@ const (
 	MSG_CURALLROUTES
 )
 
-type MsgPing struct{}
+type MsgPing struct {
+	Time time.Time `json:"time"`
+}
 
 type MsgPong struct{}
 

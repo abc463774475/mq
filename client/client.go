@@ -6,23 +6,34 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"git.intra.123u.com/rometa/romq/msg"
 	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
-type Client struct {
-	nc   net.Conn
-	addr string
+type (
+	SUBFUN func(data []byte)
+	Client struct {
+		nc   net.Conn
+		addr string
 
-	clientType int
-	msgRecv    chan *msg.Msg
-	msgSend    chan *msg.Msg
+		clientType int
+		msgRecv    chan *msg.Msg
+		msgSend    chan *msg.Msg
 
-	cquit chan struct{}
-}
+		rttDuration time.Duration
+		cquit       chan struct{}
+
+		sfs     map[string]SUBFUN
+		rwmuSFs sync.RWMutex
+
+		sid uint64
+	}
+)
 
 func newClient(addr string, ct int) *Client {
 	c := &Client{
@@ -31,13 +42,24 @@ func newClient(addr string, ct int) *Client {
 		clientType: ct,
 		msgRecv:    make(chan *msg.Msg, 200),
 		msgSend:    make(chan *msg.Msg, 200),
-		cquit:      make(chan struct{}, 1),
+		cquit:      make(chan struct{}, 2),
+		sfs:        make(map[string]SUBFUN),
 	}
+
+	go c.run()
 
 	return c
 }
 
+func NewClient(addr string) *Client {
+	return newClient(addr, 0)
+}
+
 func (c *Client) readLoop() {
+	nlog.Info("readLoop")
+	defer func() {
+		nlog.Info("readLoop end")
+	}()
 	for {
 		headeBytes := make([]byte, msg.HeadSize)
 		n, err := io.ReadFull(c.nc, headeBytes)
@@ -74,6 +96,10 @@ func (c *Client) readLoop() {
 }
 
 func (c *Client) writeLoop() {
+	nlog.Info("writeLoop")
+	defer func() {
+		nlog.Info("writeLoop end")
+	}()
 	for {
 		select {
 		case msg := <-c.msgSend:
@@ -112,14 +138,34 @@ func (c *Client) writeMsg(msg *msg.Msg) error {
 
 func (c *Client) closeConnection() {
 	c.nc.Close()
+	// just twice to make sure, since there have two goroutines
+	c.cquit <- struct{}{}
+	c.cquit <- struct{}{}
+}
+
+func (c *Client) del() {
+	close(c.msgRecv)
+	close(c.msgSend)
+	close(c.cquit)
 }
 
 func (c *Client) processMsg() {
-	//nolint:gosimple
+	nlog.Info("processMsg")
+	tick := time.NewTicker(time.Second * 5)
+
+	defer func() {
+		nlog.Info("processMsg end")
+		tick.Stop()
+	}()
+
 	for {
 		select {
 		case msg := <-c.msgRecv:
 			c.processMsgImpl(msg)
+		case <-tick.C:
+			c.sendPing()
+		case <-c.cquit:
+			return
 		}
 	}
 }
@@ -130,7 +176,6 @@ func (c *Client) run() {
 	nlog.Info("client run")
 	defer func() {
 		nlog.Info("client run end")
-		c.closeConnection()
 	}()
 
 	c.connect()
@@ -149,11 +194,13 @@ func (c *Client) run() {
 
 	c.processMsg()
 	wg.Wait()
+	c.del()
 }
 
 func (c *Client) connect() {
 	var err error
-	c.nc, err = net.Dial("tcp", c.addr)
+	c.nc, err = net.DialTimeout("tcp", c.addr, time.Second*5)
+
 	if err != nil {
 		panic("err = " + err.Error())
 	}
@@ -166,10 +213,10 @@ func (c *Client) processMsgImpl(_msg *msg.Msg) {
 	nlog.Info("processMsgImpl: %v  %v", _msg.Head.ID, string(_msg.Data))
 	switch _msg.ID {
 	case msg.MSG_PING:
-		c.SendMsg(msg.MSG_PONG, msg.MsgPong{})
+		c.processMsgPing(_msg)
 	case msg.MSG_PONG:
+		c.processMsgPong(_msg)
 	case msg.MSG_HANDSHAKE:
-	case msg.MSG_SNAPSHOTSUBS:
 	case msg.MSG_SUB:
 	case msg.MSG_PUB:
 		c.processMsgPub(_msg)
@@ -178,16 +225,16 @@ func (c *Client) processMsgImpl(_msg *msg.Msg) {
 
 func (c *Client) register() {
 	nlog.Info("register")
-	c.SendMsg(msg.MSG_HANDSHAKE, &msg.MsgHandshake{
+	c.sendMsg(msg.MSG_HANDSHAKE, &msg.MsgHandshake{
 		Type: int32(c.clientType),
 		Name: "client test",
 	})
 }
 
-func (c *Client) SendMsg(msgID msg.MSGID, i interface{}) {
+func (c *Client) sendMsg(msgID msg.MSGID, i interface{}) {
 	data, err := json.Marshal(i)
 	if err != nil {
-		nlog.Erro("SendMsg: json.Marshal: %v", err)
+		nlog.Erro("sendMsg: json.Marshal: %v", err)
 		return
 	}
 
@@ -204,7 +251,7 @@ func (c *Client) SendMsg(msgID msg.MSGID, i interface{}) {
 	if len(c.msgSend) < cap(c.msgSend) {
 		c.msgSend <- msg
 	} else {
-		nlog.Erro("SendMsg: msgSend is full")
+		nlog.Erro("sendMsg: msgSend is full")
 	}
 }
 
@@ -216,4 +263,52 @@ func (c *Client) processMsgPub(_msg *msg.Msg) {
 		return
 	}
 	nlog.Debug("processMsgPub: %v  %v", pub.Sub, string(pub.Data))
+
+	c.rwmuSFs.RLock()
+	sf, ok := c.sfs[pub.Sub]
+	if !ok {
+		c.rwmuSFs.RUnlock()
+		nlog.Erro("processMsgPub: sub not found: %v", pub.Sub)
+		return
+	}
+	c.rwmuSFs.RUnlock()
+
+	sf(pub.Data)
+}
+
+func (c *Client) Subscribe(sub string, f SUBFUN) {
+	c.rwmuSFs.Lock()
+	c.sfs[sub] = f
+
+	atomic.AddUint64(&c.sid, 1)
+	sid := atomic.LoadUint64(&c.sid)
+	strSID := strconv.FormatUint(sid, 20)
+	c.sendMsg(msg.MSG_SUB, &msg.MsgSub{
+		Sub: sub,
+		SID: strSID,
+	})
+
+	c.rwmuSFs.Unlock()
+}
+
+func (c *Client) UnSubscribe(sub string) {
+	c.rwmuSFs.Lock()
+	if _, ok := c.sfs[sub]; !ok {
+		nlog.Erro("UnSubscribe: %v not exist", sub)
+		c.rwmuSFs.Unlock()
+		return
+	}
+
+	c.sendMsg(msg.MSG_UNSUB, &msg.MsgUnSub{
+		Subs: []string{sub},
+	})
+	delete(c.sfs, sub)
+	c.rwmuSFs.Unlock()
+}
+
+func (c *Client) Publish(sub string, data []byte) {
+	c.sendMsg(msg.MSG_PUB, &msg.MsgPub{
+		Sub:  sub,
+		Data: data,
+	})
 }

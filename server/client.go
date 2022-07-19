@@ -308,7 +308,7 @@ func (c *client) SendMsg(msgID msg.MSGID, i interface{}) {
 	} else {
 		data, err = json.Marshal(i)
 		if err != nil {
-			nlog.Erro("SendMsg: json.Marshal: %v", err)
+			nlog.Erro("sendMsg: json.Marshal: %v", err)
 			return
 		}
 	}
@@ -326,7 +326,7 @@ func (c *client) SendMsg(msgID msg.MSGID, i interface{}) {
 	if len(c.msgSend) < cap(c.msgSend) {
 		c.msgSend <- msg
 	} else {
-		nlog.Erro("SendMsg: msgSend is full")
+		nlog.Erro("sendMsg: msgSend is full")
 	}
 }
 

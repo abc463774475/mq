@@ -35,6 +35,7 @@ func TestServer_route1(t *testing.T) {
 
 func TestServer_route2(t *testing.T) {
 	nlog.InitLog(nlog.WithCompressType(nlog.Quick))
+
 	snowflake.Init(3)
 	s := newServer(WithName("rout2"),
 		WithAddr(":8089"),

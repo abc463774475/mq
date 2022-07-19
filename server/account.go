@@ -83,7 +83,7 @@ func (a *Account) addClient(c *client) {
 		return
 	}
 	a.clients[c] = struct{}{}
-	nlog.Debug("Account.addClient: added client %v", a.name)
+	// nlog.Debug("Account.addClient: added client %v", a.name)
 	a.clientMu.Unlock()
 }
 

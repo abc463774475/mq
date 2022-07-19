@@ -76,7 +76,7 @@ func (s *server) startClientListener() {
 }
 
 func (s *server) acceptOneConnection(conn net.Conn, kind ClientType) {
-	nlog.Info("acceptOneConnection %v", conn.RemoteAddr())
+	// nlog.Info("acceptOneConnection %v", conn.RemoteAddr())
 	id := snowflake.GetID()
 	c := newAcceptClient(id, conn, s)
 	c.kind = kind
@@ -259,7 +259,7 @@ func (s *server) startRouterListener() {
 }
 
 func (s *server) addRemoteName(c *client, rname string) {
-	nlog.Erro("addRemoteName: %v %v", c.id, rname)
+	nlog.Debug("addRemoteName: %v %v", c.id, rname)
 	s.lock.Lock()
 	if _, ok := s.routes[c.id]; !ok {
 		nlog.Erro("addRemoteName: client %v not in routes", c.id)

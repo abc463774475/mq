@@ -17,7 +17,8 @@ type route struct {
 
 // buf not json just fro quick
 func (c *client) addRouteSubOrUnsubProtoToBuf(buf []byte,
-	accName string, sub *subscription, isSub bool) []byte {
+	accName string, sub *subscription, isSub bool,
+) []byte {
 	if isSub {
 		buf = append(buf, '+')
 	} else {
@@ -38,7 +39,7 @@ func (c *client) addRouteSubOrUnsubProtoToBuf(buf []byte,
 func (c *client) connect() bool {
 	var err error
 	addr := c.addr
-	c.nc, err = net.Dial("tcp", addr)
+	c.nc, err = net.DialTimeout("tcp", addr, time.Second*5)
 	if err != nil {
 		return false
 	}
@@ -49,7 +50,7 @@ func (c *client) connect() bool {
 }
 
 //func (c *client) routerRegister() {
-//	c.SendMsg(msg.MSG_HANDSHAKE, &msg.MsgHandshake{
+//	c.sendMsg(msg.MSG_HANDSHAKE, &msg.MsgHandshake{
 //		Type: int32(c.kind),
 //		Name: utils.GetSessionIDByTimer(),
 //	})
