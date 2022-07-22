@@ -16,9 +16,12 @@ const (
 	MSG_SNAPSHOTSUBS
 
 	MSG_SUB
+	// 订阅是否成功返回
+	MSG_SUBACK
 	MSG_UNSUB
 
 	MSG_PUB
+	MSG_PUBRESP
 	MSG_ROUTEPUB
 
 	MSG_NEWROUTE
@@ -44,7 +47,9 @@ type MsgSnapshot struct {
 }
 
 type MsgSub struct {
-	Sub string `json:"sub"`
+	// Unique ID of this subscriber, used in return error message
+	UniqueID int64  `json:"uniqueID"`
+	Sub      string `json:"sub"`
 	// SID sequence id
 	SID string `json:"sid"`
 }
@@ -54,8 +59,9 @@ type MsgUnSub struct {
 }
 
 type MsgPub struct {
-	Sub  string `json:"sub"`
-	Data []byte `json:"data"`
+	UniqueID int64  `json:"uniqueID"`
+	Sub      string `json:"sub"`
+	Data     []byte `json:"data"`
 }
 
 type MsgSnapshotSubs struct {
@@ -98,4 +104,19 @@ type MsgCurAllRoutes struct {
 
 type MsgRemoteRouteAddUnsub struct {
 	Subs []string `json:"subs"`
+}
+
+type MsgSubAck struct {
+	// 0 success, 1 error
+	Code     int32  `json:"code"`
+	UniqueID int64  `json:"uniqueID"`
+	Sub      string `json:"sub"`
+}
+
+type MsgPubResp struct {
+	// 0 success, 1 error
+	Code     int32  `json:"code"`
+	UniqueID int64  `json:"uniqueID"`
+	Sub      string `json:"sub"`
+	Data     []byte `json:"data"`
 }

@@ -11,12 +11,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"git.intra.123u.com/rometa/romq/utils/snowflake"
+
 	"git.intra.123u.com/rometa/romq/msg"
 	nlog "github.com/abc463774475/my_tool/n_log"
 )
 
 type (
-	SUBFUN func(data []byte)
+	SUBFUN      func(data []byte, _msg *msg.MsgPub)
+	SUBACKFUN   func(_msg *msg.MsgSubAck)
+	PUBCALLBACK func(data []byte)
+
 	Client struct {
 		nc   net.Conn
 		addr string
@@ -31,19 +36,27 @@ type (
 		sfs     map[string]SUBFUN
 		rwmuSFs sync.RWMutex
 
+		sackfun  map[int64]SUBACKFUN
+		rwmuSAck sync.RWMutex
+
+		pubCallback map[int64]PUBCALLBACK
+		rwmuPubCB   sync.RWMutex
+
 		sid uint64
 	}
 )
 
 func newClient(addr string, ct int) *Client {
 	c := &Client{
-		nc:         nil,
-		addr:       addr,
-		clientType: ct,
-		msgRecv:    make(chan *msg.Msg, 200),
-		msgSend:    make(chan *msg.Msg, 200),
-		cquit:      make(chan struct{}, 2),
-		sfs:        make(map[string]SUBFUN),
+		nc:          nil,
+		addr:        addr,
+		clientType:  ct,
+		msgRecv:     make(chan *msg.Msg, 200),
+		msgSend:     make(chan *msg.Msg, 200),
+		cquit:       make(chan struct{}, 2),
+		sfs:         make(map[string]SUBFUN),
+		sackfun:     make(map[int64]SUBACKFUN),
+		pubCallback: make(map[int64]PUBCALLBACK),
 	}
 
 	go c.run()
@@ -136,11 +149,31 @@ func (c *Client) writeMsg(msg *msg.Msg) error {
 	return nil
 }
 
+// client active close
+func (c *Client) ActiveClose() {
+	c.UnsubAll()
+	// todo 简单实现
+	time.AfterFunc(time.Second*2, func() {
+		c.nc.Close()
+	})
+}
+
 func (c *Client) closeConnection() {
 	c.nc.Close()
 	// just twice to make sure, since there have two goroutines
 	c.cquit <- struct{}{}
 	c.cquit <- struct{}{}
+}
+
+func (c *Client) UnsubAll() {
+	c.rwmuSFs.RLock()
+	defer c.rwmuSFs.RUnlock()
+	subs := make([]string, 0, len(c.sfs))
+	for k := range c.sfs {
+		subs = append(subs, k)
+	}
+
+	c.sendMsg(msg.MSG_UNSUB, msg.MsgUnSub{Subs: subs})
 }
 
 func (c *Client) del() {
@@ -216,10 +249,10 @@ func (c *Client) processMsgImpl(_msg *msg.Msg) {
 		c.processMsgPing(_msg)
 	case msg.MSG_PONG:
 		c.processMsgPong(_msg)
-	case msg.MSG_HANDSHAKE:
-	case msg.MSG_SUB:
 	case msg.MSG_PUB:
 		c.processMsgPub(_msg)
+	case msg.MSG_SUBACK:
+		c.processMsgSubAck(_msg)
 	}
 }
 
@@ -273,20 +306,37 @@ func (c *Client) processMsgPub(_msg *msg.Msg) {
 	}
 	c.rwmuSFs.RUnlock()
 
-	sf(pub.Data)
+	sf(pub.Data, pub)
 }
 
-func (c *Client) Subscribe(sub string, f SUBFUN) {
-	c.rwmuSFs.Lock()
-	c.sfs[sub] = f
+func (c *Client) Subscribe(sub string, subf SUBFUN, subackf SUBACKFUN) {
+	c.rwmuSFs.RLock()
+	_, ok := c.sfs[sub]
+	if ok {
+		c.rwmuSFs.RUnlock()
+		nlog.Erro("Subscribe: sub already exists: %v", sub)
+		return
+	}
 
+	c.rwmuSFs.RUnlock()
+
+	c.rwmuSFs.Lock()
+	c.sfs[sub] = subf
 	atomic.AddUint64(&c.sid, 1)
 	sid := atomic.LoadUint64(&c.sid)
 	strSID := strconv.FormatUint(sid, 20)
+	uid := snowflake.GetID()
 	c.sendMsg(msg.MSG_SUB, &msg.MsgSub{
-		Sub: sub,
-		SID: strSID,
+		UniqueID: uid,
+		Sub:      sub,
+		SID:      strSID,
 	})
+
+	if subackf != nil {
+		c.rwmuSAck.Lock()
+		c.sackfun[uid] = subackf
+		c.rwmuSAck.Unlock()
+	}
 
 	c.rwmuSFs.Unlock()
 }
@@ -306,9 +356,88 @@ func (c *Client) UnSubscribe(sub string) {
 	c.rwmuSFs.Unlock()
 }
 
-func (c *Client) Publish(sub string, data []byte) {
+func (c *Client) Publish(sub string, i interface{}) {
+	var data []byte
+	var err error
+	switch i.(type) {
+	case []byte:
+		data = i.([]byte)
+	case *[]byte:
+		data = *i.(*[]byte)
+	case string:
+		data = []byte(i.(string))
+	case *string:
+		data = []byte(*i.(*string))
+	default:
+		data, err = json.Marshal(i)
+		if err != nil {
+			nlog.Erro("Publish: json.Marshal: %v", err)
+			return
+		}
+	}
+
 	c.sendMsg(msg.MSG_PUB, &msg.MsgPub{
-		Sub:  sub,
-		Data: data,
+		UniqueID: snowflake.GetID(),
+		Sub:      sub,
+		Data:     data,
 	})
+}
+
+func (c *Client) Req(sub string, i interface{}, pubCB PUBCALLBACK) {
+	var data []byte
+	var err error
+	switch i.(type) {
+	case []byte:
+		data = i.([]byte)
+	case *[]byte:
+		data = *i.(*[]byte)
+	case string:
+		data = []byte(i.(string))
+	case *string:
+		data = []byte(*i.(*string))
+	default:
+		data, err = json.Marshal(i)
+		if err != nil {
+			nlog.Erro("Publish: json.Marshal: %v", err)
+			return
+		}
+	}
+	uid := snowflake.GetID()
+
+	// c.rwmuPubCB.Lock()
+	// c.pubCallback[uid] = pubCB
+	// c.rwmuPubCB.Unlock()
+
+	c.Subscribe(fmt.Sprintf("%v", uid), func(data []byte, pub *msg.MsgPub) {
+		pubCB(data)
+	}, nil)
+
+	c.sendMsg(msg.MSG_PUB, &msg.MsgPub{
+		UniqueID: uid,
+		Sub:      sub,
+		Data:     data,
+	})
+}
+
+func (c *Client) processMsgSubAck(_msg *msg.Msg) {
+	suback := &msg.MsgSubAck{}
+	err := json.Unmarshal(_msg.Data, suback)
+	if err != nil {
+		nlog.Erro("processMsgSubAck: json.Unmarshal: %v", err)
+		return
+	}
+
+	c.rwmuSAck.Lock()
+	subackf, ok := c.sackfun[suback.UniqueID]
+	if !ok {
+		c.rwmuSAck.Unlock()
+		// nlog.Erro("processMsgSubAck: suback not found: %v", suback.UniqueID)
+		return
+	}
+
+	delete(c.sackfun, suback.UniqueID)
+
+	c.rwmuSAck.Unlock()
+
+	subackf(suback)
 }

@@ -22,11 +22,12 @@ func TestClient_sub(t *testing.T) {
 }
 
 func TestClient_pub(t *testing.T) {
-	c := newClient("localhost:8089", 0)
+	c := newClient("localhost:8087", 0)
+	data := []byte{1, 1, 1, 1}
 	time.AfterFunc(2*time.Second, func() {
 		c.sendMsg(msg.MSG_PUB, msg.MsgPub{
 			Sub:  "haorena",
-			Data: []byte("hello 111111111"),
+			Data: data,
 		})
 	})
 	c.run()

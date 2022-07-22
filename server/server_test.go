@@ -47,3 +47,8 @@ func TestServer_route2(t *testing.T) {
 
 	nlog.Info("end")
 }
+
+func TestLen(t *testing.T) {
+	str := `{"sub":"haorena","data":"AQEBAQ=="}`
+	t.Log(len(str))
+}

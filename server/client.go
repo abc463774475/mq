@@ -167,8 +167,8 @@ func (c *client) init() {
 	c.subs = make(map[string]*subscription, 100)
 	c.subsWithSID = make(map[string]*subscription, 100)
 	c.mperms = &msgDeny{}
-	c.msgRecv = make(chan *msg.Msg, 200)
-	c.msgSend = make(chan *msg.Msg, 200)
+	c.msgRecv = make(chan *msg.Msg, 2000)
+	c.msgSend = make(chan *msg.Msg, 2000)
 	c.cquit = make(chan struct{}, 2)
 }
 
@@ -191,9 +191,9 @@ func (c *client) run() {
 	}()
 
 	c.processMsg()
+	wg.Wait()
 
 	c.del()
-	wg.Wait()
 }
 
 func (c *client) readLoop() {
@@ -288,6 +288,7 @@ func (c *client) processMsg() {
 	defer func() {
 		nlog.Info("client processMsg end")
 	}()
+
 	for {
 		select {
 		case msg := <-c.msgRecv:
@@ -301,7 +302,8 @@ func (c *client) processMsg() {
 func (c *client) SendMsg(msgID msg.MSGID, i interface{}) {
 	var data []byte
 	var err error
-	if d, ok := i.([]byte); ok {
+	if i == nil {
+	} else if d, ok := i.([]byte); ok {
 		data = d
 	} else if d, ok := i.(string); ok {
 		data = []byte(d)
@@ -457,6 +459,12 @@ func (c *client) processMsgSub(_msg *msg.Msg) {
 	if kind == CLIENT {
 		srv.updateRouteSubscriptionMap(acc, sub)
 	}
+
+	c.SendMsg(msg.MSG_SUBACK, msg.MsgSubAck{
+		Code:     0,
+		UniqueID: msub.UniqueID,
+		Sub:      msub.Sub,
+	})
 }
 
 func (c *client) processMsgUnSub(_msg *msg.Msg) {
