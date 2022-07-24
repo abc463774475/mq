@@ -35,6 +35,7 @@ func processBaseMgrMsg(_msg *msg.BaseMgrMsg, pub *msg.MsgPub) {
 			if pub.UniqueID != 0 {
 				c.Publish(fmt.Sprintf("%v", pub.UniqueID), "register ok")
 			}
+
 		}
 	case msg.BaseMgrMsgID_PlayerLogin:
 		{
@@ -62,6 +63,16 @@ func processBaseMgrMsg(_msg *msg.BaseMgrMsg, pub *msg.MsgPub) {
 					BaseID: _baseID,
 				})
 			}
+
+			{
+				data, _ := json.Marshal(msg.BaseMsgPlayerLogin{
+					PlayerID: _login.PlayerID,
+				})
+				c.Publish(fmt.Sprintf("base:%v", _baseID), msg.BaseMsg{
+					MsgID: msg.BaseMsgID_PlayerLogin,
+					Data:  data,
+				})
+			}
 		}
 	}
 }
@@ -87,5 +98,25 @@ func TestBaseMgr(t *testing.T) {
 		}
 	})
 
-	time.Sleep(100 * time.Second)
+	time.Sleep(1000 * time.Second)
+}
+
+func sendToCell(playerID int64, id msg.CellMsgID, i interface{}) {
+	var data []byte
+	switch i.(type) {
+	case string:
+		data = []byte(i.(string))
+	case []byte:
+		data = i.([]byte)
+	case *string:
+		data = []byte(*i.(*string))
+	case *[]byte:
+		data = *i.(*[]byte)
+	default:
+		data, _ = json.Marshal(i)
+	}
+	c.Publish(fmt.Sprintf("cell:%v", playerID), msg.CellMsg{
+		MsgID: id,
+		Data:  data,
+	})
 }

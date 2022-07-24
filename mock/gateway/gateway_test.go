@@ -2,7 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
-	"strconv"
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,7 +16,7 @@ var c *client.Client
 
 func playerLogin() {
 	playerID := snowflake.GetID()
-	str := strconv.FormatUint(uint64(playerID), 20)
+	str := fmt.Sprintf("gateway:%v", playerID)
 
 	c.Subscribe(str, func(data []byte, pub *msg.MsgPub) {
 		nlog.Debug("data: %s", string(data))
@@ -53,5 +53,21 @@ func TestGateway(t *testing.T) {
 
 	playerLogin()
 
-	time.Sleep(100 * time.Second)
+	time.Sleep(1000 * time.Second)
+}
+
+func sendMsg(msgID int, i interface{}) {
+	// send to base
+	if msgID > 10000 && msgID <= 20000 {
+		c.Publish("base:player:10001", msg.BaseMsg{
+			MsgID: msg.BaseMsgID(msgID),
+		})
+	}
+
+	// send to cell
+	if msgID > 20000 && msgID <= 30000 {
+		c.Publish("cell:player:10001", msg.CellMsg{
+			MsgID: msg.CellMsgID(msgID),
+		})
+	}
 }

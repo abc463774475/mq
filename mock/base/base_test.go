@@ -19,6 +19,32 @@ var (
 	subName = fmt.Sprintf("base:%d", baseID)
 )
 
+func processBaseMsg(_msg *msg.BaseMsg, pub *msg.MsgPub) {
+	switch _msg.MsgID {
+	case msg.BaseMsgID_PlayerLogin:
+		{
+			_login := &msg.BaseMsgPlayerLogin{}
+			err := json.Unmarshal(_msg.Data, _login)
+			if err != nil {
+				nlog.Erro("json unmarshal error: %s", err.Error())
+				return
+			}
+
+			nlog.Debug("player login: %+v", _login)
+
+			// todo db mock can not support
+			// how to send back to client
+			c.Publish(fmt.Sprintf("gateway:%v", _login.PlayerID), "login ok")
+
+			c.Subscribe(fmt.Sprintf("base:player:%v", _login.PlayerID), func(data []byte, pub *msg.MsgPub) {
+				nlog.Info("base:player subscribe:  callback %+v", string(data))
+			}, nil)
+
+			// send to cellMgr
+		}
+	}
+}
+
 func TestBase(t *testing.T) {
 	nlog.InitLog(nlog.WithCompressType(nlog.Easy))
 	snowflake.Init(2)
@@ -36,7 +62,14 @@ func TestBase(t *testing.T) {
 	})
 
 	c.Subscribe(subName, func(data []byte, _msg *msg.MsgPub) {
-		nlog.Debug("data: %s", string(data))
+		nlog.Erro("base subscribe:  callback %+v", string(data))
+		bMsg := &msg.BaseMsg{}
+		err := json.Unmarshal(data, bMsg)
+		if err != nil {
+			nlog.Erro("json unmarshal error: %s", err.Error())
+			return
+		}
+		processBaseMsg(bMsg, _msg)
 	}, func(_msg *msg.MsgSubAck) {
 		nlog.Debug("sub ack: %+v", _msg)
 		if _msg.Code != 0 {
@@ -44,5 +77,5 @@ func TestBase(t *testing.T) {
 		}
 	})
 
-	time.Sleep(100 * time.Second)
+	time.Sleep(10000 * time.Second)
 }
